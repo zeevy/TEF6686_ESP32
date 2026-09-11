@@ -23,6 +23,17 @@
 #define TIMER_BAT_TIMER             (TIMER_500_TICK)
 #define TIMER_500_TICK              500
 
+// SQL pot used as a volume control, see doVolumePot()
+#define VOLUMEPOT_SAMPLES             8   // ADC reads averaged per update
+#define VOLUMEPOT_DEADBAND           25   // raw counts the pot must move before it counts
+#define VOLUMEPOT_INTERVAL           50   // ms between updates
+#define VOLUMEPOT_RAW_MUTE          100   // below this the pot is treated as off
+#define VOLUMEPOT_RAW_MIN           120   // raw count treated as VOLUMEPOT_DB_MIN
+#define VOLUMEPOT_RAW_MAX          4000   // raw count treated as VOLUMEPOT_DB_MAX
+#define VOLUMEPOT_DB_MUTE           -60   // TEF668x lowest volume, silent
+#define VOLUMEPOT_DB_MIN            -30   // quiet end of the usable travel
+#define VOLUMEPOT_DB_MAX              0   // loud end
+
 // Frequency band picker screen, see showFreqBandPicker() and doTouchEvent()
 #define FREQPICKER_ROW_H            32   // height of one band row
 #define FREQPICKER_TOP              34   // first row cannot start above this
@@ -237,9 +248,11 @@
 #define EE_CHECKBYTE_VALUE            20     // 0 ~ 255,add new entry, change for new value
 #define EE_PRESETS_FREQUENCY          0     // Default value when memory channel should be skipped!
 #ifdef HAS_AIR_BAND
-#define EE_TOTAL_CNT                  2305  // Total occupied eeprom bytes
+#define EE_BYTE_VOLUMEPOT             2305
+#define EE_TOTAL_CNT                  2306  // Total occupied eeprom bytes
 #else
-#define EE_TOTAL_CNT                  2300  // Total occupied eeprom bytes
+#define EE_BYTE_VOLUMEPOT             2300
+#define EE_TOTAL_CNT                  2301  // Total occupied eeprom bytes
 #endif
 
 #define EE_PRESETS_BAND_START         0     // 99 * 1 byte

@@ -141,6 +141,7 @@ bool setupmode;
 bool showclock;
 bool showlongps;
 bool usesquelch;
+bool volumepot;
 bool softmuteam;
 bool softmutefm;
 bool SQ;
@@ -349,6 +350,8 @@ int8_t NTPoffset;
 int8_t CN;
 int8_t CNold;
 int8_t VolSet;
+int8_t volumepotdb = 127;   // 127 means nothing applied yet
+int16_t volumepotraw = -1000;
 float batteryVold;
 IPAddress remoteip;
 String AIDString;
@@ -444,6 +447,7 @@ unsigned long afticker;
 unsigned long aftickerhold;
 unsigned long aftimer;
 unsigned long autosquelchtimer;
+unsigned long volumepottimer;
 unsigned long batteryWarningTimer;
 unsigned long blockcounterold[33];
 unsigned long eonticker;
@@ -613,6 +617,10 @@ void setup() {
   scancancel = EEPROM.readByte(EE_BYTE_SCANCANCEL);
   scanmute = EEPROM.readByte(EE_BYTE_SCANMUTE);
   autosquelch = EEPROM.readByte(EE_BYTE_AUTOSQUELCH);
+  // EE_CHECKBYTE_VALUE is deliberately not bumped for this byte, so nobody
+  // loses their settings. EEPROM.begin memsets the grown part of the blob to
+  // 0xFF (EEPROM.cpp), so an existing radio reads 0xFF here, not 1.
+  volumepot = (EEPROM.readByte(EE_BYTE_VOLUMEPOT) == 1);
   longbandpress = EEPROM.readByte(EE_BYTE_LONGBANDPRESS);
   showclock = EEPROM.readByte(EE_BYTE_SHOWCLOCK);
   showlongps = EEPROM.readByte(EE_BYTE_SHOWLONGPS);
@@ -992,6 +1000,11 @@ void setup() {
 
 void loop() {
   wifiPoll();
+
+  // The volume pot is read here and not from doSquelch, because doSquelch sits
+  // behind a 300 ms timer in one of the paths below. This is the volume knob,
+  // so it has to follow the hand straight away.
+  if (volumepot && !usesquelch && !XDRGTKUSB && !XDRGTKTCP && !menu && !BWtune && !freqkeypadtune && !freqBandPicker) doVolumePot();
 
   if (wifi && !menu) {
     webserver.handleClient();
@@ -3722,6 +3735,44 @@ void showAutoSquelch(bool mode) {
   }
 }
 
+// Reads the SQL pot and uses it as the tuner volume. Runs when the Use squelch
+// menu item is set to one of the Volume values. The pot has its own level and
+// never touches VolSet, so the Set volume menu item and EEPROM are left alone.
+// That means the pot level is lost on reboot, which is fine for a knob.
+//
+// The ESP32 ADC is noisy, so the samples are averaged and a new reading is only
+// taken when the pot has really moved. setVolume is an I2C write and this runs
+// from the main loop, so it only fires when the dB value changes.
+void doVolumePot() {
+  if (millis() - volumepottimer < VOLUMEPOT_INTERVAL) return;
+  volumepottimer = millis();
+
+  uint32_t sum = 0;
+  for (uint8_t i = 0; i < VOLUMEPOT_SAMPLES; i++) sum += analogRead(PIN_POT);
+  int16_t raw = sum / VOLUMEPOT_SAMPLES;
+
+  if (raw > volumepotraw - VOLUMEPOT_DEADBAND && raw < volumepotraw + VOLUMEPOT_DEADBAND) return;
+  volumepotraw = raw;
+
+  // The bottom of the travel is a mute zone. Above it the rest of the rotation
+  // spans VOLUMEPOT_DB_MIN to VOLUMEPOT_DB_MAX. Keeping that span narrow
+  // matters: a full -60 dB across the whole travel leaves the lower half
+  // inaudible, so most of the knob does nothing you can hear.
+  int8_t volume;
+  if (raw <= VOLUMEPOT_RAW_MUTE) {
+    volume = VOLUMEPOT_DB_MUTE;
+  } else {
+    if (raw < VOLUMEPOT_RAW_MIN) raw = VOLUMEPOT_RAW_MIN;
+    if (raw > VOLUMEPOT_RAW_MAX) raw = VOLUMEPOT_RAW_MAX;
+    volume = map(raw, VOLUMEPOT_RAW_MIN, VOLUMEPOT_RAW_MAX, VOLUMEPOT_DB_MIN, VOLUMEPOT_DB_MAX);
+  }
+
+  if (volume != volumepotdb) {
+    volumepotdb = volume;
+    radio.setVolume(volumepotdb);
+  }
+}
+
 void doSquelch() {
   if (!XDRGTKUSB && !XDRGTKTCP && usesquelch && !autosquelch) Squelch = map(analogRead(PIN_POT), 0, 4095, -100, 920);
   if (Squelch < - 800) Squelch = -100;
@@ -4746,6 +4797,7 @@ void DefaultSettings() {
   EEPROM.writeUInt(EE_UINT16_CALTOUCH4, 3450);
   EEPROM.writeUInt(EE_UINT16_CALTOUCH5, 3);
   EEPROM.writeByte(EE_BYTE_NTPOFFSET, 1);
+  EEPROM.writeByte(EE_BYTE_VOLUMEPOT, 0);
   EEPROM.writeByte(EE_BYTE_AUTOLOG, 1);
   EEPROM.writeByte(EE_BYTE_AUTODST, 1);
   EEPROM.writeByte(EE_BYTE_CLOCKAMPM, 0);
@@ -4931,6 +4983,13 @@ void endMenu() {
   menuoption = ITEM1;
   menupage = INDEX;
   menuitem = 0;
+  // Set volume may have been changed in the menu, which writes straight to
+  // the tuner. Make the pot apply its own level again on the next read.
+  volumepotdb = 127;
+  volumepotraw = -1000;
+  // With the pot no longer driving the volume, put the menu level back, or the
+  // tuner stays at whatever the pot last set.
+  if (!volumepot) radio.setVolume(VolSet);
   EEPROM.writeByte(EE_BYTE_VOLSET, VolSet);
   EEPROM.writeUInt(EE_UINT16_CONVERTERSET, ConverterSet);
   EEPROM.writeUInt(EE_UINT16_FMLOWEDGESET, LowEdgeSet);
@@ -5003,6 +5062,7 @@ void endMenu() {
   EEPROM.writeByte(EE_BYTE_SCANCANCEL, scancancel);
   EEPROM.writeByte(EE_BYTE_SCANMUTE, scanmute);
   EEPROM.writeByte(EE_BYTE_AUTOSQUELCH, autosquelch);
+  EEPROM.writeByte(EE_BYTE_VOLUMEPOT, volumepot);
   EEPROM.writeByte(EE_BYTE_LONGBANDPRESS, longbandpress);
   EEPROM.writeByte(EE_BYTE_SHOWCLOCK, showclock);
   EEPROM.writeByte(EE_BYTE_SHOWLONGPS, showlongps);
