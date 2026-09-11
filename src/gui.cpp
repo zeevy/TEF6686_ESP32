@@ -2995,16 +2995,16 @@ void BuildMenu() {
     tft.drawRoundRect(4, 4, 15, 20, 3, ActiveColor);
     tft.fillTriangle(12, 8, 8, 14, 12, 20, (CurrentTheme == 7 ? White : ActiveColor));
 
-    if (items[menupage] > 0) ShowOneButton(ITEM1, 0, false);
-    if (items[menupage] > 1) ShowOneButton(ITEM2, 1, false);
-    if (items[menupage] > 2) ShowOneButton(ITEM3, 2, false);
-    if (items[menupage] > 3) ShowOneButton(ITEM4, 3, false);
-    if (items[menupage] > 4) ShowOneButton(ITEM5, 4, false);
-    if (items[menupage] > 5) ShowOneButton(ITEM6, 5, false);
-    if (items[menupage] > 6) ShowOneButton(ITEM7, 6, false);
-    if (items[menupage] > 7) ShowOneButton(ITEM8, 7, false);
-    if (items[menupage] > 8) ShowOneButton(ITEM9, 8, false);
-    if (items[menupage] > 9) ShowOneButton(ITEM10, 9, false);
+    if (items[menupage] > 0) ShowOneButton(ITEM1, 0, menuoption == ITEM1);
+    if (items[menupage] > 1) ShowOneButton(ITEM2, 1, menuoption == ITEM2);
+    if (items[menupage] > 2) ShowOneButton(ITEM3, 2, menuoption == ITEM3);
+    if (items[menupage] > 3) ShowOneButton(ITEM4, 3, menuoption == ITEM4);
+    if (items[menupage] > 4) ShowOneButton(ITEM5, 4, menuoption == ITEM5);
+    if (items[menupage] > 5) ShowOneButton(ITEM6, 5, menuoption == ITEM6);
+    if (items[menupage] > 6) ShowOneButton(ITEM7, 6, menuoption == ITEM7);
+    if (items[menupage] > 7) ShowOneButton(ITEM8, 7, menuoption == ITEM8);
+    if (items[menupage] > 8) ShowOneButton(ITEM9, 8, menuoption == ITEM9);
+    if (items[menupage] > 9) ShowOneButton(ITEM10, 9, menuoption == ITEM10);
   } else {
     ShowOneLine(ITEM1, 0, (menuoption == ITEM1 ? true : false));
     ShowOneLine(ITEM2, 1, (menuoption == ITEM2 ? true : false));
