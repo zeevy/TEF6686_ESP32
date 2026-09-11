@@ -8,6 +8,14 @@
 extern mem presets[];
 bool setWiFiConnectParam = false;
 
+// Value text for the Use squelch menu item. Five values, built from strings
+// that already exist in every language table, so language.h needs no change.
+static String squelchText() {
+  if (volumepot) return String(autosquelch ? textUI(86) : textUI(30)) + " + " + textUI(10);
+  if (autosquelch) return textUI(86);
+  return usesquelch ? textUI(31) : textUI(30);
+}
+
 void doTheme() {  // Use this to put your own colors in: http://www.barth-dev.de/online/rgb565-color-picker/
   switch (CurrentTheme) {
     case 0:  // Default PE5PVB theme
@@ -985,11 +993,11 @@ void ShowOneLine(byte position, byte item, bool selected) {
         case MAINSETTINGS:
           FullLineSprite.setTextDatum(TL_DATUM);
           FullLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
-          FullLineSprite.drawString(removeNewline(textUI(62)), 6, 2);
+          FullLineSprite.drawString(shortLine(removeNewline(textUI(62)), FullLineSprite, 145), 6, 2);
 
           FullLineSprite.setTextDatum(TR_DATUM);
           FullLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
-          if (autosquelch) FullLineSprite.drawString(textUI(86), 298, 2); else FullLineSprite.drawString((usesquelch ? textUI(31) : textUI(30)), 298, 2);
+          FullLineSprite.drawString(shortLine(squelchText(), FullLineSprite, 140), 298, 2);
           break;
 
         case AUDIOSETTINGS:
@@ -2090,7 +2098,7 @@ void ShowOneButton(byte position, byte item, bool selected) {
           PSSprite.drawString(shortLine(removeNewline(textUI(62))), 75, 1);
 
           PSSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
-          if (autosquelch) PSSprite.drawString(textUI(86), 75, 15); else PSSprite.drawString((usesquelch ? textUI(31) : textUI(30)), 75, 15);
+          PSSprite.drawString(shortLine(squelchText()), 75, 15);
           break;
 
         case AUDIOSETTINGS:
@@ -3394,18 +3402,25 @@ void MenuUpDown(bool dir) {
             break;
 
           case ITEM4:
-            if (autosquelch && !usesquelch) {
+            // Off, On, Auto, Auto + Volume, Off + Volume, then round again.
+            if (!usesquelch && !autosquelch && !volumepot) {          // Off -> On
               usesquelch = true;
-              autosquelch = false;
-            } else if (usesquelch && !autosquelch) {
-              usesquelch = false;
-              autosquelch = false;
-            } else {
+            } else if (usesquelch) {                                  // On -> Auto
               usesquelch = false;
               autosquelch = true;
+            } else if (autosquelch && !volumepot) {                   // Auto -> Auto + Volume
+              volumepot = true;
+            } else if (autosquelch) {                                 // Auto + Vol -> Off + Vol
+              autosquelch = false;
+            } else {                                                  // Off + Vol -> Off
+              volumepot = false;
             }
 
-            if (autosquelch) OneBigLineSprite.drawString(textUI(86), 135, 0); else OneBigLineSprite.drawString((usesquelch ? textUI(31) : textUI(30)), 135, 0);
+            // Make the pot apply its level again the next time it is read.
+            volumepotdb = 127;
+            volumepotraw = -1000;
+
+            OneBigLineSprite.drawString(shortLine(squelchText(), OneBigLineSprite, 250), 135, 0);
             OneBigLineSprite.pushSprite(24, 118);
             break;
 
@@ -4803,7 +4818,7 @@ void DoMenu() {
 
           case ITEM4:
             Infoboxprint(textUI(62));
-            if (autosquelch) OneBigLineSprite.drawString(textUI(86), 135, 0); else OneBigLineSprite.drawString((usesquelch ? textUI(31) : textUI(30)), 135, 0);
+            OneBigLineSprite.drawString(shortLine(squelchText(), OneBigLineSprite, 250), 135, 0);
             OneBigLineSprite.pushSprite(24, 118);
             break;
 
@@ -5849,6 +5864,21 @@ void drawButton(const char* text, byte button_number, bool active, bool selected
 
   // Draw the button text
   tftPrint(ACENTER, text, x + buttonWidth / 2, y + (buttonHeight / 4) - 2, ActiveColor, ActiveColorSmooth, 16);
+}
+
+// Same idea as shortLine below, but measured with the sprite the text will
+// actually be drawn in. Needed for the Use squelch value, which joins two
+// translated words and gets long in some languages.
+String shortLine(String text, TFT_eSprite &sprite, int maxwidth) {
+  if (sprite.textWidth(text) <= maxwidth) return text;
+  while (sprite.textWidth(text + "...") > maxwidth && text.length() > 0) {
+    int lastCharIndex = text.length() - 1;
+    while (lastCharIndex > 0 && (text[lastCharIndex] & 0xC0) == 0x80) {
+      lastCharIndex--;
+    }
+    text = text.substring(0, lastCharIndex);
+  }
+  return text + "...";
 }
 
 String shortLine(String text) {

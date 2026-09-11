@@ -182,6 +182,12 @@ void Communication() {
       wificonnected = false;
       RDSSPYTCP = false;
       XDRGTKTCP = false;
+      // The client went away without sending X, so do what that handler does
+      // for the volume. Put the menu level back and let the pot apply its own
+      // level again on the next read.
+      radio.setVolume(VolSet);
+      volumepotdb = 127;
+      volumepotraw = -1000;
     }
 
     if (!RDSSPYTCP && !XDRGTKTCP && RemoteClient.available()) {
@@ -946,6 +952,10 @@ void XDRGTKRoutine() {
         softmuteam = EEPROM.readByte(EE_BYTE_SOFTMUTEAM);
         softmutefm = EEPROM.readByte(EE_BYTE_SOFTMUTEFM);
         radio.setVolume(VolSet);
+        // XDR-GTK just overwrote the volume, so let the pot apply its own
+        // level again on the next read.
+        volumepotdb = 127;
+        volumepotraw = -1000;
         radio.setSoftmuteFM(softmutefm);
         radio.setSoftmuteAM(softmuteam);
         if (!usesquelch) radio.setUnMute();
