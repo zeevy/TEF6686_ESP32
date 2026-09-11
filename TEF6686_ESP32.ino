@@ -2664,9 +2664,10 @@ void ModeButtonPress() {
               menuopen = false;
             }
             submenu = false;
-            menuoption = ITEM1;
+            // Come back on the row that opened this page, not on the first row.
+            menuitem = (menupage == INDEX ? 0 : menupage - 1);
+            menuoption = ITEM1 + menuitem * ITEM_GAP;
             menupage = INDEX;
-            menuitem = 0;
             PSSprite.unloadFont();
             if (language == LANGUAGE_CHS) PSSprite.loadFont(FONT16_CHS); else PSSprite.loadFont(FONT16);
             BuildMenu();
