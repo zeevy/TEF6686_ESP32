@@ -153,6 +153,7 @@ extern void updateiMS();
 extern void updateEQ();
 extern void tftPrint(int8_t offset, const String & text, int16_t x, int16_t y, int color, int smoothcolor, uint8_t fontsize);
 extern void showAutoSquelch(bool mode);
+extern void applyVolume(int8_t base);
 extern void ShowStepSize();
 extern void startFMDXScan();
 extern void cancelDXScan();

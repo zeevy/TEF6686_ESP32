@@ -16,6 +16,19 @@ static String squelchText() {
   return usesquelch ? textUI(31) : textUI(30);
 }
 
+// Label for the Volume AGC menu item. Built from textUI(10) plus "AGC", which
+// is left untranslated the same way "FM AGC" and "AM AGC" already are, so
+// language.h needs no change.
+static String audioagcText() {
+  return String(textUI(10)) + " AGC";
+}
+
+// Label for the boost item. The plus says it adds gain, which is what separates
+// it from the AGC target row above it.
+static String audioagcBoostText() {
+  return String(textUI(10)) + " AGC +";
+}
+
 void doTheme() {  // Use this to put your own colors in: http://www.barth-dev.de/online/rgb565-color-picker/
   switch (CurrentTheme) {
     case 0:  // Default PE5PVB theme
@@ -1490,6 +1503,18 @@ void ShowOneLine(byte position, byte item, bool selected) {
           break;
 #endif
 
+        case AUDIOSETTINGS:
+          FullLineSprite.setTextDatum(TL_DATUM);
+          FullLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+          FullLineSprite.drawString(shortLine(audioagcText(), FullLineSprite, 145), 6, 2);
+
+          FullLineSprite.setTextDatum(TR_DATUM);
+          FullLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
+          if (audioagc != 0) FullLineSprite.drawString(String(audioagc, DEC), 258, 2);
+          if (audioagc != 0) FullLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+          FullLineSprite.drawString((audioagc != 0 ? "%" : textUI(30)), 298, 2);
+          break;
+
         case DISPLAYSETTINGS:
           FullLineSprite.setTextDatum(TL_DATUM);
           FullLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
@@ -1590,6 +1615,18 @@ void ShowOneLine(byte position, byte item, bool selected) {
             case SCREENOFF: FullLineSprite.drawString(textUI(226), 298, 2); break;
             default: FullLineSprite.drawString(textUI(227), 298, 2); break;
           }
+          break;
+
+        case AUDIOSETTINGS:
+          FullLineSprite.setTextDatum(TL_DATUM);
+          FullLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+          FullLineSprite.drawString(shortLine(audioagcBoostText(), FullLineSprite, 145), 6, 2);
+
+          FullLineSprite.setTextDatum(TR_DATUM);
+          FullLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
+          if (audioagcboost != 0) FullLineSprite.drawString("+" + String(audioagcboost, DEC), 258, 2);
+          if (audioagcboost != 0) FullLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+          FullLineSprite.drawString((audioagcboost != 0 ? "dB" : textUI(30)), 298, 2);
           break;
 
         case DISPLAYSETTINGS:
@@ -2611,6 +2648,15 @@ void ShowOneButton(byte position, byte item, bool selected) {
           break;
 #endif
 
+        case AUDIOSETTINGS:
+          PSSprite.setTextDatum(TC_DATUM);
+          PSSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+          PSSprite.drawString(shortLine(audioagcText()), 75, 1);
+
+          PSSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
+          PSSprite.drawString((audioagc != 0 ? String(audioagc, DEC) + "%" : String(textUI(30))), 75, 15);
+          break;
+
         case DISPLAYSETTINGS:
           PSSprite.setTextDatum(TC_DATUM);
           PSSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
@@ -2708,6 +2754,15 @@ void ShowOneButton(byte position, byte item, bool selected) {
             case SCREENOFF: PSSprite.drawString(textUI(226), 75, 15); break;
             default: PSSprite.drawString(textUI(227), 75, 15); break;
           }
+          break;
+
+        case AUDIOSETTINGS:
+          PSSprite.setTextDatum(TC_DATUM);
+          PSSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+          PSSprite.drawString(shortLine(audioagcBoostText()), 75, 1);
+
+          PSSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
+          PSSprite.drawString((audioagcboost != 0 ? "+" + String(audioagcboost, DEC) + " dB" : String(textUI(30))), 75, 15);
           break;
 
         case DISPLAYSETTINGS:
@@ -3594,7 +3649,7 @@ void MenuUpDown(bool dir) {
             OneBigLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
             OneBigLineSprite.drawString((VolSet > 0 ? "+" : "") + String(VolSet, DEC), 135, 0);
             OneBigLineSprite.pushSprite(24, 118);
-            radio.setVolume(VolSet);
+            applyVolume(VolSet);
             break;
 
           case ITEM2:
@@ -3694,6 +3749,53 @@ void MenuUpDown(bool dir) {
             OneBigLineSprite.drawString((fmdeemphasis != DEEMPHASIS_NONE ? (fmdeemphasis == DEEMPHASIS_50 ? String(FM_DEEMPHASIS_50, DEC) : String(FM_DEEMPHASIS_75, DEC)) : textUI(30)), 135, 0);
             OneBigLineSprite.pushSprite(24, 118);
             radio.setDeemphasis(fmdeemphasis);
+            break;
+
+          case ITEM8:
+            // Off, then AGC_TARGET_MIN up to AGC_TARGET_MAX in steps, then Off
+            // again. Same shape as the Stereo threshold item above, so every
+            // value is reachable turning the knob either way.
+            if (dir) {
+              if (audioagc == 0) audioagc = AGC_TARGET_MIN;
+              else if (audioagc >= AGC_TARGET_MAX) audioagc = 0;
+              else audioagc += AGC_TARGET_STEP;
+            } else {
+              if (audioagc == 0) audioagc = AGC_TARGET_MAX;
+              else if (audioagc <= AGC_TARGET_MIN) audioagc = 0;
+              else audioagc -= AGC_TARGET_STEP;
+            }
+            // Hand the volume straight back when it is switched off, so the
+            // change is heard at once and not on the next pass of loop().
+            if (audioagc == 0) resetAudioAGC();
+
+            OneBigLineSprite.setTextDatum(TL_DATUM);
+            OneBigLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+            if (audioagc != 0) OneBigLineSprite.drawString("%", 155, 0);
+            if (audioagc != 0) OneBigLineSprite.setTextDatum(TR_DATUM); else OneBigLineSprite.setTextDatum(TC_DATUM);
+            OneBigLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
+            OneBigLineSprite.drawString((audioagc != 0 ? String(audioagc, DEC) : String(textUI(30))), 135, 0);
+            OneBigLineSprite.pushSprite(24, 118);
+            break;
+
+          case ITEM9:
+            // Off, then AGC_BOOST_MIN up to AGC_BOOST_MAX in steps, then Off.
+            if (dir) {
+              if (audioagcboost == 0) audioagcboost = AGC_BOOST_MIN;
+              else if (audioagcboost >= AGC_BOOST_MAX) audioagcboost = 0;
+              else audioagcboost += AGC_BOOST_STEP;
+            } else {
+              if (audioagcboost == 0) audioagcboost = AGC_BOOST_MAX;
+              else if (audioagcboost <= AGC_BOOST_MIN) audioagcboost = 0;
+              else audioagcboost -= AGC_BOOST_STEP;
+            }
+
+            OneBigLineSprite.setTextDatum(TL_DATUM);
+            OneBigLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+            if (audioagcboost != 0) OneBigLineSprite.drawString("dB", 155, 0);
+            if (audioagcboost != 0) OneBigLineSprite.setTextDatum(TR_DATUM); else OneBigLineSprite.setTextDatum(TC_DATUM);
+            OneBigLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
+            OneBigLineSprite.drawString((audioagcboost != 0 ? "+" + String(audioagcboost, DEC) : String(textUI(30))), 135, 0);
+            OneBigLineSprite.pushSprite(24, 118);
             break;
         }
         break;
@@ -4941,7 +5043,7 @@ void DoMenu() {
             OneBigLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
             OneBigLineSprite.drawString((VolSet > 0 ? "+" : "") + String(VolSet, DEC), 135, 0);
             OneBigLineSprite.pushSprite(24, 118);
-            radio.setVolume(VolSet);
+            applyVolume(VolSet);
             break;
 
           case ITEM2:
@@ -5003,6 +5105,30 @@ void DoMenu() {
             if (fmdeemphasis != DEEMPHASIS_NONE) OneBigLineSprite.setTextDatum(TR_DATUM); else OneBigLineSprite.setTextDatum(TC_DATUM);
             OneBigLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
             OneBigLineSprite.drawString((fmdeemphasis != DEEMPHASIS_NONE ? (fmdeemphasis == DEEMPHASIS_50 ? String(FM_DEEMPHASIS_50, DEC) : String(FM_DEEMPHASIS_75, DEC)) : textUI(30)), 135, 0);
+            OneBigLineSprite.pushSprite(24, 118);
+            break;
+
+          case ITEM8:
+            Infoboxprint(audioagcText().c_str());
+
+            OneBigLineSprite.setTextDatum(TL_DATUM);
+            OneBigLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+            if (audioagc != 0) OneBigLineSprite.drawString("%", 155, 0);
+            if (audioagc != 0) OneBigLineSprite.setTextDatum(TR_DATUM); else OneBigLineSprite.setTextDatum(TC_DATUM);
+            OneBigLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
+            OneBigLineSprite.drawString((audioagc != 0 ? String(audioagc, DEC) : String(textUI(30))), 135, 0);
+            OneBigLineSprite.pushSprite(24, 118);
+            break;
+
+          case ITEM9:
+            Infoboxprint(audioagcBoostText().c_str());
+
+            OneBigLineSprite.setTextDatum(TL_DATUM);
+            OneBigLineSprite.setTextColor(ActiveColor, ActiveColorSmooth, false);
+            if (audioagcboost != 0) OneBigLineSprite.drawString("dB", 155, 0);
+            if (audioagcboost != 0) OneBigLineSprite.setTextDatum(TR_DATUM); else OneBigLineSprite.setTextDatum(TC_DATUM);
+            OneBigLineSprite.setTextColor(PrimaryColor, PrimaryColorSmooth, false);
+            OneBigLineSprite.drawString((audioagcboost != 0 ? "+" + String(audioagcboost, DEC) : String(textUI(30))), 135, 0);
             OneBigLineSprite.pushSprite(24, 118);
             break;
         }
