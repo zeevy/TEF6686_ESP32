@@ -185,7 +185,7 @@ void Communication() {
       // The client went away without sending X, so do what that handler does
       // for the volume. Put the menu level back and let the pot apply its own
       // level again on the next read.
-      radio.setVolume(VolSet);
+      applyVolume(VolSet);
       volumepotdb = 127;
       volumepotraw = -1000;
     }
@@ -869,7 +869,7 @@ void XDRGTKRoutine() {
             if (!XDRMute) {
               radio.setUnMute();
               if (!screenmute) tft.drawBitmap(249, 4, Speaker, 28, 24, GreyoutColor);
-              radio.setVolume(VolSet);
+              applyVolume(VolSet);
             }
             break;
         }
@@ -921,7 +921,7 @@ void XDRGTKRoutine() {
           VolSet = (xdrvol - 40) / 10;
           if (VolSet > 10) VolSet = 10;
           if (VolSet < -10) VolSet = -10;
-          radio.setVolume(VolSet);
+          applyVolume(VolSet);
           XDRMute = false;
         }
         DataPrint("Y" + String(xdrvol) + "\n");
@@ -951,7 +951,7 @@ void XDRGTKRoutine() {
         LowLevelSet = EEPROM.readByte(EE_BYTE_LOWLEVELSET);
         softmuteam = EEPROM.readByte(EE_BYTE_SOFTMUTEAM);
         softmutefm = EEPROM.readByte(EE_BYTE_SOFTMUTEFM);
-        radio.setVolume(VolSet);
+        applyVolume(VolSet);
         // XDR-GTK just overwrote the volume, so let the pot apply its own
         // level again on the next read.
         volumepotdb = 127;

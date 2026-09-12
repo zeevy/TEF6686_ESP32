@@ -206,10 +206,12 @@ byte freqfont;
 byte amcodect;
 byte amcodectcount;
 byte amgain;
+byte audioagc;              // AGC target modulation percent, 0 is off
+byte audioagcboost;         // most dB the AGC may add to a quiet station, 0 is cut only
 byte freqoldcount;
 byte HighCutLevel;
 byte HighCutOffset;
-byte items[10] = {10, static_cast<byte>(dynamicspi ? 10 : 9), 7, 10, 10, 10, 9, 10, 10, 9};
+byte items[10] = {10, static_cast<byte>(dynamicspi ? 10 : 9), 9, 10, 10, 10, 9, 10, 10, 9};
 byte iMSEQ;
 byte iMSset;
 byte language;
@@ -352,6 +354,14 @@ int8_t CNold;
 int8_t VolSet;
 int8_t volumepotdb = 127;   // 127 means nothing applied yet
 int16_t volumepotraw = -1000;
+int8_t volumebase;          // volume the user asked for, before the AGC
+int8_t agcgain;             // dB the AGC adds on top, negative to cut, positive up to audioagcboost
+float agcavg;               // running average of the modulation, percent
+byte agcticks;              // usable updates since the last tune, for the fast settle
+byte agcidle;               // updates since the last usable one, see doAudioAGC
+uint16_t agclastmod = AGC_MOD_NONE;  // last modulation reading fed to the average
+byte agcband = 255;         // band the average belongs to, 255 means none yet
+unsigned int agcfreq;       // frequency the average belongs to
 float batteryVold;
 IPAddress remoteip;
 String AIDString;
@@ -448,6 +458,7 @@ unsigned long aftickerhold;
 unsigned long aftimer;
 unsigned long autosquelchtimer;
 unsigned long volumepottimer;
+unsigned long agctimer;
 unsigned long batteryWarningTimer;
 unsigned long blockcounterold[33];
 unsigned long eonticker;
@@ -621,6 +632,13 @@ void setup() {
   // loses their settings. EEPROM.begin memsets the grown part of the blob to
   // 0xFF (EEPROM.cpp), so an existing radio reads 0xFF here, not 1.
   volumepot = (EEPROM.readByte(EE_BYTE_VOLUMEPOT) == 1);
+  // Same story as volumepot above. An existing radio reads the 0xFF fill here,
+  // and anything outside the menu range means the AGC has never been set, so it
+  // stays off.
+  audioagc = EEPROM.readByte(EE_BYTE_AUDIOAGC);
+  if (audioagc < AGC_TARGET_MIN || audioagc > AGC_TARGET_MAX) audioagc = 0;
+  audioagcboost = EEPROM.readByte(EE_BYTE_AUDIOAGCBOOST);
+  if (audioagcboost > AGC_BOOST_MAX) audioagcboost = 0;
   longbandpress = EEPROM.readByte(EE_BYTE_LONGBANDPRESS);
   showclock = EEPROM.readByte(EE_BYTE_SHOWCLOCK);
   showlongps = EEPROM.readByte(EE_BYTE_SHOWLONGPS);
@@ -954,7 +972,7 @@ void setup() {
   tryWiFi();
   delay(1500);
 
-  radio.setVolume(VolSet);
+  applyVolume(VolSet);
   radio.setOffset(LevelOffset);
   radio.setAMOffset(AMLevelOffset);
   if (band > BAND_GAP && band != BAND_AIR) {
@@ -1005,6 +1023,11 @@ void loop() {
   // behind a 300 ms timer in one of the paths below. This is the volume knob,
   // so it has to follow the hand straight away.
   if (volumepot && !usesquelch && !XDRGTKUSB && !XDRGTKTCP && !menu && !BWtune && !freqkeypadtune && !freqBandPicker) doVolumePot();
+
+  // The AGC needs the modulation reading, so it runs from here on its own
+  // timer. When it is off it still gets a call, to hand the volume back if it
+  // was just switched off.
+  if (audioagc) doAudioAGC(); else resetAudioAGC();
 
   if (wifi && !menu) {
     webserver.handleClient();
@@ -1340,7 +1363,7 @@ void loop() {
     if (!BWtune && !freqkeypadtune && !freqBandPicker && !menu && (screenmute || radio.rds.correctPI != 0)) readRds();
     if (millis() >= lowsignaltimer + 300) {
       lowsignaltimer = millis();
-      if (af || (!screenmute || (screenmute && (XDRGTKTCP || XDRGTKUSB)))) {
+      if (af || audioagc || (!screenmute || (screenmute && (XDRGTKTCP || XDRGTKUSB)))) {
         if (band < BAND_GAP) {
           radio.getStatus(SStatus, USN, WAM, OStatus, BW, MStatus, CN);
         } else {
@@ -1354,7 +1377,7 @@ void loop() {
     }
 
   } else {
-    if (af || (!screenmute || (screenmute && (XDRGTKTCP || XDRGTKUSB)))) {
+    if (af || audioagc || (!screenmute || (screenmute && (XDRGTKTCP || XDRGTKUSB)))) {
       if (band < BAND_GAP) {
         radio.getStatus(SStatus, USN, WAM, OStatus, BW, MStatus, CN);
       } else {
@@ -3641,14 +3664,18 @@ void ShowBW() {
 void ShowModLevel() {
   if (showmodulation) {
     int segments;
-    MStatus = (MStatus > 120) ? 120 : MStatus;
+    // Work on a copy. The global is what the tuner last reported and doAudioAGC
+    // reads it to spot readings that are out of range. Clamping it here used to
+    // hide those from the AGC, and only when the bar was on screen, so the AGC
+    // behaved differently depending on a display setting.
+    uint16_t mod = (MStatus > 120) ? 120 : MStatus;
 
     if (seek || SQ) {
-      MStatus = 0;
+      mod = 0;
       MStatusold = 1;
     }
 
-    segments = constrain(map(MStatus, 0, 120, 0, 86), 0, 86);
+    segments = constrain(map(mod, 0, 120, 0, 86), 0, 86);
 
     if (segments < DisplayedSegments && (millis() - ModulationpreviousMillis >= 20)) {
       DisplayedSegments = max(DisplayedSegments - 3, segments);
@@ -3721,7 +3748,7 @@ void ShowModLevel() {
 
     // Draw peak hold marker
     int peakHoldPosition = constrain(16 + 2 * peakholdold, 16, 16 + 2 * 86);
-    tft.fillRect(peakHoldPosition, 133, 2, 6, (MStatus > 80) ? ModBarSignificantColor : PrimaryColor);
+    tft.fillRect(peakHoldPosition, 133, 2, 6, (mod > 80) ? ModBarSignificantColor : PrimaryColor);
 
     if (millis() - peakholdmillis >= 1000) {
       if (peakholdold <= DisplayedSegments || peakholdold >= 86) {
@@ -3741,6 +3768,167 @@ void showAutoSquelch(bool mode) {
     tft.drawBitmap(223, 145, AutoSQ, 18, 18, BackgroundColor);
   }
 }
+
+// The one place that writes the tuner volume. base is the level the user asked
+// for, from the menu, the volume pot or XDR-GTK. The AGC gain is added on top
+// here, so the AGC never fights the other three and they never wipe out the
+// AGC. Everything that changes the volume calls this instead of setVolume.
+void applyVolume(int8_t base) {
+  volumebase = base;
+  // The bottom of the volume pot asks for TUNER_VOLUME_MIN, which means silent.
+  // Adding the AGC gain there would lift the radio back out of that, so the
+  // gain is left off when the user has asked for silence.
+  int16_t level = (base <= TUNER_VOLUME_MIN) ? base : base + agcgain;
+  if (level > TUNER_VOLUME_MAX) level = TUNER_VOLUME_MAX;
+  if (level < TUNER_VOLUME_MIN) level = TUNER_VOLUME_MIN;
+  radio.setVolume(level);
+}
+
+// Hands the volume back to the user level and forgets the average. Called when
+// the AGC is off and when XDR-GTK takes over.
+void resetAudioAGC() {
+  agcticks = 0;
+  agcavg = 0;
+  if (agcgain == 0) return;
+  agcgain = 0;
+  applyVolume(volumebase);
+}
+
+// Levels off the loudness difference between stations. Stations modulate to
+// different depths, so one sounds louder than the next at the same volume
+// setting. The tuner reports the modulation depth in percent in MStatus, and a
+// slow average of that is a good measure of how loud a station is. The AGC
+// turns the volume down on the loud ones until they match the audioagc target.
+//
+// Cutting alone only brings the loud stations down to the target and leaves the
+// quiet ones where they are, so they stay quieter than the rest. audioagcboost
+// is how many dB the AGC may add to bring those up as well, and 0 turns that
+// off. The reason it is a setting and not always on: a boost clips on a station
+// with a low average but full peaks, and it lifts the noise on a weak signal.
+// Cut only is the safe choice, and the price is that everything plays a little
+// quieter, so the amplifier is turned up once and left alone.
+//
+// A lower target evens the stations out more, because every station above it is
+// brought down to it and only the ones below are left alone, but it also makes
+// everything quieter. That trade is the user's to make, so it is a menu value.
+//
+// The average is slow on purpose, or the gain would follow the music and pump.
+// For the first AGC_SETTLE_TICKS after a tune it runs fast, so a new station
+// settles in about two seconds, then it goes slow and stays there.
+//
+// Anything that is not a usable signal is left alone and the gain is held where
+// it is, because the modulation reading is meaningless on noise.
+void doAudioAGC() {
+  // XDR-GTK sets the volume itself and expects the level it asked for.
+  if (XDRGTKUSB || XDRGTKTCP) {
+    resetAudioAGC();
+    return;
+  }
+
+  // Hold the gain while a band scan walks the dial. The frequency changes on
+  // every channel, so the average would restart each time and the volume would
+  // ramp up and down through the whole scan. Same while the menu is open, so
+  // the AGC does not move the audio under the Set volume item.
+  if (scandxmode || menu) return;
+
+  if (millis() - agctimer < AGC_INTERVAL) return;
+  agctimer = millis();
+
+  unsigned int tuned;
+  if (band == BAND_OIRT) tuned = frequency_OIRT;
+  else if (band < BAND_GAP) tuned = frequency;
+  else tuned = frequency_AM;
+
+  if (tuned != agcfreq || band != agcband) {
+    agcfreq = tuned;
+    agcband = band;
+    agcticks = 0;
+    agcidle = 0;
+    agcavg = 0;
+    agclastmod = AGC_MOD_NONE;
+  }
+
+  // Whether this tick has anything worth measuring. The audio must be playing,
+  // the tuner must be sitting still, and the signal must be out of the noise,
+  // because noise reads as heavy modulation and would pull the gain down.
+  //
+  // getStatusAM and getStatus both hand back the modulation as unsigned, so a
+  // negative raw reading arrives as a number in the thousands. Those are
+  // dropped rather than clamped, or the garbage would read as full modulation.
+  // Silence and speech pauses are dropped for the opposite reason, they would
+  // drag the average down. What is wanted is how loud the station is while it
+  // is playing.
+
+  // Noise reads as heavy modulation, so an empty channel has to be rejected or
+  // the AGC turns the volume down on it. The two bands need different tests.
+  // On FM the ultrasonic noise reading does the job, against a threshold
+  // measured off real stations. On AM the same variable holds a different
+  // reading from getStatusAM, so the AGC reuses the test the band scan and the
+  // squelch already use to decide an AM channel is worth stopping on. That also
+  // makes it follow the AM scan sensitivity setting.
+  bool quiet = (band < BAND_GAP) ? (USN / 10 <= AGC_MAX_NOISE)
+                                 : (USN < amscansens * 30);
+
+  // This runs every AGC_INTERVAL, but on a weak FM signal the tuner is only
+  // read every 300 ms, so the same reading would otherwise be averaged in three
+  // times and AGC_MIN_TICKS would be met by two real samples. Only count a tick
+  // when the reading has actually moved.
+  bool fresh = MStatus != agclastmod;
+
+  bool usable = !seek && !SQ && !radio.mute && quiet && fresh
+                && SStatus / 10 >= AGC_MIN_SIGNAL
+                && MStatus >= AGC_MOD_MIN && MStatus <= AGC_MOD_MAX;
+
+  if (usable) {
+    agclastmod = MStatus;
+    agcidle = 0;
+    float mod = MStatus;
+    if (agcticks == 0) {
+      agcavg = mod;
+      agcticks = 1;
+    } else {
+      agcavg += (mod - agcavg) / (agcticks < AGC_SETTLE_TICKS ? AGC_FAST_DIV : AGC_SLOW_DIV);
+      if (agcticks < AGC_SETTLE_TICKS) agcticks++;
+    }
+  } else if (agcidle < AGC_IDLE_TICKS) {
+    agcidle++;
+  }
+
+  // Below this there is no usable average yet. A couple of samples are not a
+  // loudness measurement, and acting on them means a loud or quiet moment at
+  // the instant of tuning sends the gain the wrong way, heard as a swoop.
+  //
+  // Once nothing has been measurable for a while, walk the gain back to 0
+  // instead. Otherwise the last station's cut sits on a station the AGC cannot
+  // read and it plays quiet for as long as it is tuned in, with nothing on
+  // screen to say why.
+  //
+  // Past this point the gain is worked out on every tick, measurable or not, so
+  // a station that dips into the noise keeps moving towards the level its
+  // average already asked for instead of freezing part way there.
+  if (agcticks < AGC_MIN_TICKS) {
+    if (agcidle >= AGC_IDLE_TICKS && agcgain != 0) {
+      agcgain += (agcgain < 0) ? AGC_STEP_DB : -AGC_STEP_DB;
+      applyVolume(volumebase);
+    }
+    return;
+  }
+
+  int16_t wanted = lroundf(20.0f * log10f((float)audioagc / agcavg));
+  if (wanted > audioagcboost) wanted = audioagcboost;
+  if (wanted < AGC_MAX_CUT) wanted = AGC_MAX_CUT;
+
+  // The deadband has to be wider than one step. Without it the gain toggles by
+  // a dB every update whenever the average sits on a rounding boundary, which
+  // is heard as tremolo and writes I2C on every tick.
+  int16_t error = wanted - agcgain;
+  if (error > -AGC_DEADBAND_DB && error < AGC_DEADBAND_DB) return;
+
+  // One step per update, so the change is heard as a fade and not a jump.
+  agcgain += (error > 0) ? AGC_STEP_DB : -AGC_STEP_DB;
+  applyVolume(volumebase);
+}
+
 
 // Reads the SQL pot and uses it as the tuner volume. Runs when the Use squelch
 // menu item is set to one of the Volume values. The pot has its own level and
@@ -3776,7 +3964,7 @@ void doVolumePot() {
 
   if (volume != volumepotdb) {
     volumepotdb = volume;
-    radio.setVolume(volumepotdb);
+    applyVolume(volumepotdb);
   }
 }
 
@@ -4860,6 +5048,8 @@ void DefaultSettings() {
   EEPROM.writeUInt(EE_UINT16_CALTOUCH5, 3);
   EEPROM.writeByte(EE_BYTE_NTPOFFSET, 1);
   EEPROM.writeByte(EE_BYTE_VOLUMEPOT, 0);
+  EEPROM.writeByte(EE_BYTE_AUDIOAGC, 0);
+  EEPROM.writeByte(EE_BYTE_AUDIOAGCBOOST, 0);
   EEPROM.writeByte(EE_BYTE_AUTOLOG, 1);
   EEPROM.writeByte(EE_BYTE_AUTODST, 1);
   EEPROM.writeByte(EE_BYTE_CLOCKAMPM, 0);
@@ -5051,7 +5241,7 @@ void endMenu() {
   volumepotraw = -1000;
   // With the pot no longer driving the volume, put the menu level back, or the
   // tuner stays at whatever the pot last set.
-  if (!volumepot) radio.setVolume(VolSet);
+  if (!volumepot) applyVolume(VolSet);
   EEPROM.writeByte(EE_BYTE_VOLSET, VolSet);
   EEPROM.writeUInt(EE_UINT16_CONVERTERSET, ConverterSet);
   EEPROM.writeUInt(EE_UINT16_FMLOWEDGESET, LowEdgeSet);
@@ -5125,6 +5315,8 @@ void endMenu() {
   EEPROM.writeByte(EE_BYTE_SCANMUTE, scanmute);
   EEPROM.writeByte(EE_BYTE_AUTOSQUELCH, autosquelch);
   EEPROM.writeByte(EE_BYTE_VOLUMEPOT, volumepot);
+  EEPROM.writeByte(EE_BYTE_AUDIOAGC, audioagc);
+  EEPROM.writeByte(EE_BYTE_AUDIOAGCBOOST, audioagcboost);
   EEPROM.writeByte(EE_BYTE_LONGBANDPRESS, longbandpress);
   EEPROM.writeByte(EE_BYTE_SHOWCLOCK, showclock);
   EEPROM.writeByte(EE_BYTE_SHOWLONGPS, showlongps);

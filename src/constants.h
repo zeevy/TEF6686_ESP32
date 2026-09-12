@@ -34,6 +34,35 @@
 #define VOLUMEPOT_DB_MIN            -30   // quiet end of the usable travel
 #define VOLUMEPOT_DB_MAX              0   // loud end
 
+// Volume AGC, see doAudioAGC(). Levels off the loudness difference between
+// stations by turning the volume down on the loud ones.
+#define AGC_INTERVAL                100   // ms between AGC updates
+// The target is the audioagc setting, not a define. It is the modulation
+// percent every station is brought down to, and 0 turns the AGC off.
+#define AGC_TARGET_MIN               30   // menu range, lower means quieter and more evened out
+#define AGC_TARGET_MAX               80
+#define AGC_TARGET_STEP               5
+#define AGC_MOD_MIN                  10   // below this the station is silent, do not measure
+#define AGC_MOD_MAX                 200   // above this the reading is not believable, drop it
+                                          // stations really do modulate past 120 percent, but a
+                                          // negative raw reading arrives unsigned as 3276 or more
+#define AGC_MOD_NONE              0xFFFF  // no reading yet, cannot be a real modulation value
+#define AGC_MIN_SIGNAL                8   // dBuV the signal must reach before the AGC measures
+#define AGC_MAX_NOISE                40   // above this USN the reading is noise, not audio (FM only)
+#define AGC_IDLE_TICKS               50   // updates with nothing to measure before the gain is released
+#define AGC_MAX_CUT                 -12   // most the AGC will turn the volume down, dB
+#define AGC_BOOST_MIN                 2   // audioagcboost menu range, dB. 0 is off, no boost at all
+#define AGC_BOOST_MAX                 8
+#define AGC_BOOST_STEP                2
+#define AGC_STEP_DB                   1   // dB the gain moves per update
+#define AGC_DEADBAND_DB               2   // dB of error the gain has to be out before it moves
+#define AGC_MIN_TICKS                 5   // updates needed before the gain is allowed to move
+#define AGC_SETTLE_TICKS             20   // updates after a tune that use the fast average
+#define AGC_FAST_DIV                  4   // fast average weight, 1 part in 4
+#define AGC_SLOW_DIV                 64   // slow average weight, 1 part in 64
+#define TUNER_VOLUME_MIN            -60   // TEF668x volume limits, dB
+#define TUNER_VOLUME_MAX             24
+
 // Frequency band picker screen, see showFreqBandPicker() and doTouchEvent()
 #define FREQPICKER_ROW_H            32   // height of one band row
 #define FREQPICKER_TOP              34   // first row cannot start above this
@@ -253,10 +282,14 @@
 #define EE_PRESETS_FREQUENCY          0     // Default value when memory channel should be skipped!
 #ifdef HAS_AIR_BAND
 #define EE_BYTE_VOLUMEPOT             2305
-#define EE_TOTAL_CNT                  2306  // Total occupied eeprom bytes
+#define EE_BYTE_AUDIOAGC              2306
+#define EE_BYTE_AUDIOAGCBOOST         2307
+#define EE_TOTAL_CNT                  2308  // Total occupied eeprom bytes
 #else
 #define EE_BYTE_VOLUMEPOT             2300
-#define EE_TOTAL_CNT                  2301  // Total occupied eeprom bytes
+#define EE_BYTE_AUDIOAGC              2301
+#define EE_BYTE_AUDIOAGCBOOST         2302
+#define EE_TOTAL_CNT                  2303  // Total occupied eeprom bytes
 #endif
 
 #define EE_PRESETS_BAND_START         0     // 99 * 1 byte
