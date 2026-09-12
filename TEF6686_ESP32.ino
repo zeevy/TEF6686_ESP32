@@ -4259,7 +4259,15 @@ float ReadBatteryVoltage() {
     mv += sample;
   }
 
-  return (mv / BATTERY_SAMPLES) * 0.002;                // assume a half divider
+  float v = (mv / BATTERY_SAMPLES) * 0.002;             // assume a half divider
+
+  // Averaging is not enough on its own. A few mV of ADC noise is one percent on
+  // the 3.0V to 4.2V span, which makes the percentage jump 49, 50, 49. A battery
+  // does not move fast, so feed the reading through a slow filter.
+  static float batteryfiltered = 0;
+  if (batteryfiltered == 0) batteryfiltered = v; else batteryfiltered += (v - batteryfiltered) / BATTERY_SMOOTHING;
+
+  return batteryfiltered;
 }
 
 void ShowBattery() {
