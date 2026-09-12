@@ -4243,6 +4243,25 @@ void ShowRSSI() {
   }
 }
 
+// The ESP32 ADC is noisy, so the samples are averaged. BATTERY_PIN sits on ADC2,
+// which the WiFi driver takes over, so a read while WiFi runs, or right after it
+// is switched off, can come back as 0. Return 0 for such a reading and let the
+// caller keep the last known value, instead of showing an empty battery.
+float ReadBatteryVoltage() {
+  uint32_t mv = 0;
+
+  // Every sample has to be sane. While ADC2 is changing hands a part of the
+  // samples can come back as 0, and averaging those in gives a voltage that
+  // looks low but real, which is what shows the warning on a full battery.
+  for (uint8_t i = 0; i < BATTERY_SAMPLES; i++) {
+    uint32_t sample = analogReadMilliVolts(BATTERY_PIN);
+    if (sample * 0.002 < BATTERY_MIN_VALID) return 0;
+    mv += sample;
+  }
+
+  return (mv / BATTERY_SAMPLES) * 0.002;                // assume a half divider
+}
+
 void ShowBattery() {
   if (millis() >= batupdatetimer + TIMER_BAT_TIMER) {
     batupdatetimer = millis();
@@ -4250,41 +4269,55 @@ void ShowBattery() {
     return;
   }
 
-  float v = analogReadMilliVolts(BATTERY_PIN) * 0.002; // assume a half divider
-  battery = map(constrain(v, BAT_LEVEL_EMPTY, BAT_LEVEL_FULL), BAT_LEVEL_EMPTY, BAT_LEVEL_FULL, 0, BAT_LEVEL_STAGE);
-  byte batteryprobe = map(constrain(v, BAT_LEVEL_EMPTY, BAT_LEVEL_FULL), BAT_LEVEL_EMPTY, BAT_LEVEL_FULL, 0, 20);
+  if (!batterydetect) return;
 
-  if (batteryold != batteryprobe) {
-    if (batterydetect) {
-      if (battery == 0) {
-        tft.drawRoundRect(277, 6, 37, 20, 2, BarSignificantColor);
-        tft.fillRoundRect(313, 13, 4, 6, 2, BarSignificantColor);
-      } else {
-        tft.drawRoundRect(277, 6, 37, 20, 2, ActiveColor);
-        tft.fillRoundRect(313, 13, 4, 6, 2, ActiveColor);
-      }
-      if (batteryoptions != BATTERY_VALUE && batteryoptions != BATTERY_PERCENT && battery != 0) {
-        tft.fillRoundRect(279, 8, (battery * 8) , 16, 2, BarInsignificantColor);
-      } else {
-        tft.fillRoundRect(279, 8, 33, 16, 2, BackgroundColor);
-      }
+  float v = ReadBatteryVoltage();
+  if (v == 0) return;                                   // no usable reading, keep what is on screen
+
+  // A screen rebuild wipes the icon and the text and sets batteryold to 6, which
+  // is outside the 0 to BAT_LEVEL_STAGE range. Draw everything again in that case.
+  bool rebuilt = (batteryold > BAT_LEVEL_STAGE);
+
+  battery = lround(constrain((v - BAT_LEVEL_EMPTY) / (BAT_LEVEL_FULL - BAT_LEVEL_EMPTY), 0.0, 1.0) * BAT_LEVEL_STAGE);
+
+  if (rebuilt || battery != batteryold) {
+    batteryold = battery;
+
+    if (battery == 0) {
+      tft.drawRoundRect(277, 6, 37, 20, 2, BarSignificantColor);
+      tft.fillRoundRect(313, 13, 4, 6, 2, BarSignificantColor);
+    } else {
+      tft.drawRoundRect(277, 6, 37, 20, 2, ActiveColor);
+      tft.fillRoundRect(313, 13, 4, 6, 2, ActiveColor);
     }
-    batteryold = batteryprobe;
 
-    if (batterydetect) {
-      float vPer = constrain((v - BATTERY_LOW_VALUE) / (BATTERY_FULL_VALUE - BATTERY_LOW_VALUE), 0.0, 1.0) * 100;
-
-      if (fabs(v - batteryVold) > 0.05 && batteryoptions == BATTERY_VALUE) {
-        tftPrint(ALEFT, String(v, 2) + "V", 279, 9, BatteryValueColor, BatteryValueColorSmooth, 16);
-        batteryVold = v;
-      } else if (int(vPer) != int(vPerold) && batteryoptions == BATTERY_PERCENT && abs(vPer - vPerold) > 0.5) {
-        tftPrint(ALEFT, String(vPer, 0) + "%", 279, 9, BatteryValueColor, BatteryValueColorSmooth, 16);
-        vPerold = vPer;
-      }
+    if (batteryoptions != BATTERY_VALUE && batteryoptions != BATTERY_PERCENT) {
+      tft.fillRoundRect(279, 8, 33, 16, 2, BackgroundColor);
+      if (battery != 0) tft.fillRoundRect(279, 8, (battery * 8), 16, 2, BarInsignificantColor);
     }
   }
-  batteryVold = 0;
-  vPerold = 0;
+
+  if (rebuilt) {
+    batteryVold = 0;                                    // print the text again, whatever it was
+    vPerold = -1;
+  }
+
+  // The text is left aligned, so a shorter value would leave the tail of the old
+  // one behind. Clear the box first.
+  if (batteryoptions == BATTERY_VALUE) {
+    if (fabs(v - batteryVold) >= 0.05) {
+      batteryVold = v;
+      tft.fillRoundRect(279, 8, 33, 16, 2, BackgroundColor);
+      tftPrint(ALEFT, String(v, 2) + "V", 279, 9, BatteryValueColor, BatteryValueColorSmooth, 16);
+    }
+  } else if (batteryoptions == BATTERY_PERCENT) {
+    float vPer = constrain((v - BATTERY_LOW_VALUE) / (BATTERY_FULL_VALUE - BATTERY_LOW_VALUE), 0.0, 1.0) * 100;
+    if (lround(vPer) != lround(vPerold) && fabs(vPer - vPerold) >= 1) {
+      vPerold = vPer;
+      tft.fillRoundRect(279, 8, 33, 16, 2, BackgroundColor);
+      tftPrint(ALEFT, String(vPer, 0) + "%", 279, 9, BatteryValueColor, BatteryValueColorSmooth, 16);
+    }
+  }
 }
 
 void CheckBatteryWarning() {
@@ -4292,8 +4325,22 @@ void CheckBatteryWarning() {
   if (menu || BWtune || freqkeypadtune || freqBandPicker || afscreen || rdsstatscreen || scandxmode) return;
   if (batteryWarningTimer != 0 && millis() - batteryWarningTimer < TIMER_BATTERY_WARNING_REPEAT) return;
 
-  float v = analogReadMilliVolts(BATTERY_PIN) * 0.002; // assume a half divider
-  if (v > BAT_LEVEL_WARN) return;
+  // This runs on every pass of the main loop, so keep the reading to the same
+  // rate as the battery icon.
+  static unsigned long batterywarningcheck = 0;
+  if (millis() - batterywarningcheck < TIMER_BAT_TIMER) return;
+  batterywarningcheck = millis();
+
+  // One bad reading is not enough. ADC2 can hand back rubbish for a moment after
+  // WiFi is switched off, and that used to show the warning on a full battery.
+  static byte batterylowstrikes = 0;
+  float v = ReadBatteryVoltage();
+  if (v == 0 || v > BAT_LEVEL_WARN) {
+    batterylowstrikes = 0;
+    return;
+  }
+  if (++batterylowstrikes < BATTERY_WARN_STRIKES) return;
+  batterylowstrikes = 0;
 
   batteryWarningActive = true;
   batteryWarningTimer = millis();
