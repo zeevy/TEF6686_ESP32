@@ -47,6 +47,9 @@
 #define BATTERY_WARN_VALUE          3.68
 #define BATTERY_LOW_VALUE           3.0
 #define BATTERY_FULL_VALUE          4.2
+#define BATTERY_SAMPLES             8    // ADC samples averaged per reading
+#define BATTERY_MIN_VALID           0.5  // below this the reading is not a battery
+#define BATTERY_WARN_STRIKES        2    // low readings needed before the warning
 
 #define XTAL_0V_ADC                 0
 #define XTAL_1V_ADC                 1050
