@@ -4021,9 +4021,9 @@ void MenuUpDown(bool dir) {
           case ITEM2:
             if (dir) {
               LowEdgeSet ++;
-              if (LowEdgeSet > 1070) (TEF == 205 ? LowEdgeSet = 640 : LowEdgeSet = 650);
+              if (LowEdgeSet > 1079) (TEF == 205 ? LowEdgeSet = 640 : LowEdgeSet = 650);
             } else {
-              LowEdgeSet -= 10;
+              LowEdgeSet --;
               if ((TEF == 205 ? LowEdgeSet < 640 : LowEdgeSet < 650)) LowEdgeSet = 1079;
             }
 
@@ -4041,7 +4041,7 @@ void MenuUpDown(bool dir) {
               HighEdgeSet ++;
               if (HighEdgeSet > 1080) HighEdgeSet = 660;
             } else {
-              HighEdgeSet -= 10;
+              HighEdgeSet --;
               if (HighEdgeSet < 660) HighEdgeSet = 1080;
             }
 
@@ -4518,9 +4518,9 @@ void MenuUpDown(bool dir) {
           case ITEM2:
             if (dir) {
               memstartfreq ++;
-              if (memstartfreq > 1070) (TEF == 205 ? memstartfreq = 640 : memstartfreq = 650);
+              if (memstartfreq > 1079) (TEF == 205 ? memstartfreq = 640 : memstartfreq = 650);
             } else {
-              memstartfreq -= 10;
+              memstartfreq --;
               if ((TEF == 205 ? memstartfreq < 640 : memstartfreq < 650)) memstartfreq = 1079;
             }
 
@@ -4538,7 +4538,7 @@ void MenuUpDown(bool dir) {
               memstopfreq ++;
               if (memstopfreq > 1080) memstopfreq = 660;
             } else {
-              memstopfreq -= 10;
+              memstopfreq --;
               if (memstopfreq < 660) memstopfreq = 1080;
             }
 

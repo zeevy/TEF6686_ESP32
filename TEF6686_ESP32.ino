@@ -1486,6 +1486,8 @@ void loop() {
     num = GetNum();
     if (num != -1)
     {
+      tottimer = millis();                              // a key counts as use, same as the buttons
+      screensavertimer = millis();
       if (!screenmute && !BWtune && !freqkeypadtune && !freqBandPicker && !menu && !advancedRDS && !rdsstatscreen && !afscreen)
       {
         NumpadProcess(num);
@@ -1494,6 +1496,8 @@ void loop() {
         ShowNum(freq_in);
       } else if (freqkeypadtune && num == 13) {
         FreqKeypadConfirm();
+      } else if (menu) {
+        MenuKeypad(num);
       }
     }
   }
@@ -2534,7 +2538,9 @@ void BWButtonPress() {
       }
     } else {
       if (!usesquelch) radio.setUnMute();
-      if (!BWtune && !freqkeypadtune && !freqBandPicker && !menu) {
+      if (menu) {
+        KeyDown();                                      // BW is the down key in the menu
+      } else if (!BWtune && !freqkeypadtune && !freqBandPicker) {
         if (!screenmute) tft.drawBitmap(249, 4, Speaker, 28, 24, GreyoutColor);
         unsigned long counterold = millis();
         unsigned long counter = millis();
@@ -5712,6 +5718,29 @@ void FreqKeypadConfirm() {
     // as well, or both screens are marked active at the same time.
     freq_in = 0;
     freqkeypadtune = false;
+  }
+}
+
+// Menu navigation from the keypad, for radios that have one. On the ATS125 pad
+// these keys sit in a cross around 8: 3 above it, BW below it, 7 and 9 either
+// side. The rotary, the rotary button and MODE keep working as before.
+void MenuKeypad(int num) {
+  if (screenmute) return;                               // same as the MODE and BW buttons
+
+  switch (num) {
+    case 3:                                             // up
+      KeyUp();
+      break;
+
+    case 8:                                             // select, same as the rotary button
+    case 9:
+    case 13:
+      ButtonPress();
+      break;
+
+    case 7:                                             // back one level, same as MODE
+      ModeButtonPress();
+      break;
   }
 }
 
